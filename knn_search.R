@@ -1,24 +1,31 @@
 library(tidyverse)
 library(Signac)
-#library(comprehenr)
 
-# adjust these for scaling
-a <- 20 # point addition. 10 uses 2.7 GB, 20 uses 6.5 GB. 
-m <- 1000 # point multiplier
-neighbors <- 10 # number of neighbors to find per cell. 
 
-# cell technique
-# cell must be first column, followed by
-# umap1 and umap 2. multiply all dimensions by 1000 to convert from decimal
-# to integer.  
+# PARAMETERS #
+a <- 20 # Value to add to each UMAP value so they are all positive. Affects reference matrix size. 10 uses 2.7 GB, 20 uses 6.5 GB. 
+m <- 1000 # point multiplier after addition. Use 1000 for 3 significant figures. Example: 3.123 becomes 3123. 
+neighbors <- 20 # number of neighbors to find per cell. Will continue searching until all are found. 
+write_to_CSV = TRUE # write results to CSV file. 
 
-generate.map <- function(ref) {
+
+# DATA #
+query_data <- readRDS("../../raw_data/from_garth/cord-cmml-granja-mapped.rds")
+ref_data <- readRDS("../../raw_data/from_garth/hematopoiesis-monocle3.rds")
+query_to_ref_umaps <- query_data$ref.umap@cell.embeddings
+ref_umaps <- ref_data$umap@cell.embeddings
+ref_pt <- ref_data@meta.data$pseudotime 
+
+
+generate.map <- function(ref, ref_pt) {
+  # Generates the reference matrix for fast look up of query cells. 
+  # Generates a matrix with dimensions max(reference UMAP value) + a * m. 
+  # Returns the reference map. 
   
   print("Generating reference map...")
   dim1 <- (max(ref[,1]) + a) * m + 10
   dim2 <- (max(ref[,2]) + a) * m + 10
   map <- matrix("X", nrow=dim1, ncol=dim2)
-  #map <- matrix("X", nrow=dim1, ncol=dim2)
   r <- nrow(ref)
   
   print("Populating map with reference cells...")
@@ -30,7 +37,7 @@ generate.map <- function(ref) {
     y <- ref[row, 2] + a
     x = x * m
     y = y * m
-    map[x, y] <- rownames(ref)[row] #ref[row,1]
+    map[x, y] <- ref_pt[row][1] # rownames(ref)[row],# cell name, pseudotime
     
   }
   print("Done.")
@@ -39,15 +46,22 @@ generate.map <- function(ref) {
 }
 
 
-# find the k nearest neighbors of each query cell in the reference map. 
-# currently using about 4GB of memory.  
 find.neighbors <- function(ref.map, query, k) {
-  
+  # Search for k nearest neighbors. 
+  # query UMAP values are transformed in the same manner as the reference values in generate.map().
+  # Transformed query UMAP values are mapped to the reference map. A spiral matrix traversal algorithm 
+  # searches outward from the initial query location until all k neighbors are found. 
+  # This approach is fast if the reference map is dense and can slow down significantly if the
+  # reference map is sparse.  
   print("Finding neighbors...")
   r <- nrow(query)
   query_neighbors <- data.frame(query_cell=c("query_cells"),
-                                ref_neighbor=c("ref_neighbors"), 
-                                euclidean_dist=c("e_dist"),
+                                qUMAP_1=c("umap1"),
+                                qUMAP_2=c("umap2"),  
+                                ref_pseudotime=c("ref_pt"),
+                                rUMAP_1=c("umap1"),
+                                rUMAP_2=c("umap2"), 
+                                euclidean_dist=c("e_dist")
                                 )
   
   for (row in 1:r) {
@@ -78,7 +92,7 @@ find.neighbors <- function(ref.map, query, k) {
         x_real = x/m - a
         y_real = y/m - a
         e_dist = sqrt((x_real-query[row,1])^2 + (y_real-query[row,2])^2)
-        query_neighbors[nrow(query_neighbors)+1,] <- c(rownames(query)[row], ref.map[x,y], e_dist)
+        query_neighbors[nrow(query_neighbors)+1,] <- c(rownames(query)[row], query[row,1], query[row,2], ref.map[x,y], x_real, y_real, e_dist)
         k_found = k_found + 1
       }
 
@@ -116,7 +130,7 @@ find.neighbors <- function(ref.map, query, k) {
           x_real = x/m - a
           y_real = y/m - a
           e_dist = sqrt((x_real-query[row,1])^2 + (y_real-query[row,2])^2)
-          query_neighbors[nrow(query_neighbors)+1,] <- c(rownames(query)[row], ref.map[x,y], e_dist)
+          query_neighbors[nrow(query_neighbors)+1,] <- c(rownames(query)[row], query[row,1], query[row,2], ref.map[x,y], x_real, y_real, e_dist)
           k_found = k_found + 1
         }
         
@@ -134,26 +148,11 @@ find.neighbors <- function(ref.map, query, k) {
 
 
 
-query_data <- readRDS("../raw_data/from_garth/cord-cmml-granja-mapped.rds")
-ref_data <- readRDS("../raw_data/from_garth/hematopoiesis-5000bp.rds")
-query_to_ref_umaps <- query_data$ref.umap@cell.embeddings
-ref_umaps <- ref_data$umap@cell.embeddings
-
-
-# BELOW, THESE ARE JUST FOR TESTING 
-# test_ref <- ref_umaps[1:4,]
-# test_query <- query_to_ref_umaps[1:4,]
-
-# ref_simple <- data.frame(umap1 = c(1.000, 1.000, 1.002, 1.005, 1.005),
-#                          umap2 = c(1.000, 1.001, 1.000, 1.005, 1.003))
-
-# query_simple <- data.frame(umap1 = c(1.001, 1.005, 1.003),
-#                            umap2 = c(1.001, 1.005, 1.002))
-
-# row.names(query_simple) <- c("cell a", "cell b", "cell c")
-# row.names(ref_simple) <- to_vec(for(i in 1:5) paste("cell",as.character(i)))
-
-
-map <- generate.map(ref_umaps)
+# FUNCTION CALLS #
+map <- generate.map(ref_umaps, ref_pt)
 query_neighbors <- find.neighbors(map, query_to_ref_umaps, neighbors)
-write.csv(query_neighbors,"./query_neighbors.csv", row.names = FALSE)
+
+if (write_to_CSV == TRUE) {
+  write.csv(query_neighbors,"./query_neighbors.csv", row.names = FALSE)
+}
+
