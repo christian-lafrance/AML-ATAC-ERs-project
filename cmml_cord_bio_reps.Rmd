@@ -10,6 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+This markdown simulates biological replicates from the original cmml/cord data, from a normal distribution, and from a poisson distribution. The normal and poisson distributions were generated using the mean pseudotime values from the real cmml and cord data sets and have the same number of values as the real data sets. 
+
+
 ```{r}
 library(tidyverse)
 library(Signac)
@@ -24,9 +27,8 @@ query_object_with_PT = readRDS("C:/Users/chris/Downloads/cord-cmml-granja-mapped
 ```
 
 
-Organize data:
-
 ```{r}
+# fetch relevant data
 cord_cmml_medians <- FetchData(query_object_with_PT, vars = c("orig.ident", "median_pseudotime")) %>% group_by(orig.ident) %>% as.data.frame()
 
 ggplot() + geom_density(data=cord_cmml_medians, aes(x=median_pseudotime, group=orig.ident, fill=orig.ident), alpha=0.5) + labs(title="Density of pseudotime values")
@@ -34,53 +36,14 @@ ggplot() + geom_density(data=cord_cmml_medians, aes(x=median_pseudotime, group=o
 
 
 ```{r}
+# separate cord and cmml
 cord_PTs <- cord_cmml_medians[cord_cmml_medians$orig.ident=="cord", ]
 cmml_PTs <- cord_cmml_medians[cord_cmml_medians$orig.ident=="cmml", ]
 ```
 
 
-### Simulate biological replicates from original data (probably not as useful).
 ```{r}
-n_cord = nrow(cord_PTs) * 0.8
-n_cmml = nrow(cmml_PTs) * 0.8
-
-simulated_cord_PTs <- data.frame(cord_sample_1=sample(x=cord_PTs$median_pseudotime, size=n_cord, replace=TRUE), 
-                                 cord_sample_2=sample(x=cord_PTs$median_pseudotime, size=n_cord, replace=TRUE),
-                                 cord_sample_3=sample(x=cord_PTs$median_pseudotime, size=n_cord, replace=TRUE),
-                                 cord_sample_4=sample(x=cord_PTs$median_pseudotime, size=n_cord, replace=TRUE),
-                                 cord_sample_5=sample(x=cord_PTs$median_pseudotime, size=n_cord, replace=TRUE))
-
-simulated_cmml_PTs <- data.frame(cmml_sample_1=sample(x=cmml_PTs$median_pseudotime, size=n_cmml, replace=TRUE), 
-                                 cmml_sample_2=sample(x=cmml_PTs$median_pseudotime, size=n_cmml, replace=TRUE), 
-                                 cmml_sample_3=sample(x=cmml_PTs$median_pseudotime, size=n_cmml, replace=TRUE), 
-                                 cmml_sample_4=sample(x=cmml_PTs$median_pseudotime, size=n_cmml, replace=TRUE), 
-                                 cmml_sample_5=sample(x=cmml_PTs$median_pseudotime, size=n_cmml, replace=TRUE))
-
-
-ggplot(simulated_cord_PTs) + 
-  geom_density(aes(x=cord_sample_1)) + 
-  geom_density(aes(x=cord_sample_2)) + 
-  geom_density(aes(x=cord_sample_3)) +
-  geom_density(aes(x=cord_sample_4)) + 
-  geom_density(aes(x=cord_sample_5)) + 
-  labs(title="Simulated cord biological replicates (n = 5)") +
-  xlab("Simulated cord pseudotime")
-
-ggplot(simulated_cmml_PTs) + 
-  geom_density(aes(x=cmml_sample_1)) + 
-  geom_density(aes(x=cmml_sample_2)) + 
-  geom_density(aes(x=cmml_sample_3)) +
-  geom_density(aes(x=cmml_sample_4)) + 
-  geom_density(aes(x=cmml_sample_5)) +
-  labs(title="Simulated cmml biological replicates (n = 5)") +
-  xlab("Simulated CMML pseudotime")
-
-```
-
-
-
-```{r}
-# for stats
+# set parameters for sampling from distributions
 n_cord = nrow(cord_PTs)
 n_cmml = nrow(cmml_PTs)
 
@@ -89,13 +52,52 @@ cmml_mean_pt <- mean(cmml_PTs$median_pseudotime, rm.na=TRUE)
 
 cord_pt_sd <- sd(cord_PTs$median_pseudotime)
 cmml_pt_sd <- sd(cmml_PTs$median_pseudotime)
+
+n = 5 # number of biological replicates
 ```
+
+
+### Simulate biological replicates from original data (probably not as useful?).
+```{r}
+n_adjust = 0.8 # adjust sample size to ensure variation. Only used for simulation from real data. 
+
+
+cord_real_sim <- data.frame(sample1 = sample(x=cord_PTs$median_pseudotime, size=n_cord*n_adjust, replace=TRUE))
+cmml_real_sim <- data.frame(sample1= sample(x=cmml_PTs$median_pseudotime, size=n_cmml*n_adjust, replace=TRUE))
+
+for (i in 2:n) {
+  col_name <- paste("sample", i, sep="")
+  cord_real_sim[col_name] <- sample(x=cord_PTs$median_pseudotime, size=n_cord*n_adjust, replace=TRUE)
+  cmml_real_sim[col_name] <- sample(x=cmml_PTs$median_pseudotime, size=n_cmml*n_adjust, replace=TRUE)
+}
+
+cord_real_sim <- pivot_longer(cord_real_sim, 
+                                 cols=c("sample1", "sample2", "sample3", "sample4", "sample5"), 
+                                 names_to = "sample",
+                                 values_to="pseudotime")
+
+cmml_real_sim <- pivot_longer(cmml_real_sim, 
+                                 cols=c("sample1", "sample2", "sample3", "sample4", "sample5"), 
+                                 names_to = "sample",
+                                 values_to="pseudotime")
+
+
+ggplot(data=cord_real_sim, aes(x=pseudotime, group=sample)) + geom_density() + 
+  labs(title=paste("Simulated Cord pseudotime values from real data,", n, "biological reps")) + 
+  xlab("Pseudotime values")
+
+
+ggplot(data=cmml_real_sim, aes(x=pseudotime, group=sample)) + geom_density() + 
+  labs(title=paste("Simulated CMML pseudotime values from real data,", n, "biological reps")) +
+  xlab("Pseudotime values")
+
+```
+
+
 
 
 ### Simulate biological reps from normal distribution
 ```{r}
-n = 5 # number of biological replicates
-
 # this will include some negative pseudotime values. We may need to find a way
 # around this. Cannot use abs() because this would skew away from a normal
 # distribution. 
@@ -171,3 +173,19 @@ ggplot(data=cmml_rand_pois, aes(x=pseudotime, group=sample)) + geom_density() +
 
 
 
+### These are the dataframes with the simulated data. 
+
+```{r}
+# Simulated from original data
+cord_real_sim
+cmml_real_sim
+
+# Simulated from normal distribution
+cord_rand_normal
+cmml_rand_normal
+
+# Simulated from poisson distribution
+cord_rand_pois
+cmml_rand_pois
+
+```
