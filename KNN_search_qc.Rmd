@@ -1,0 +1,256 @@
+---
+title: "KNN_search_qc"
+author: "Christian La France"
+date: "2022-11-09"
+output: html_document
+---
+
+## Summary of *k* nearest neighbor script      
+
+This markdown summarizes the work to estimate query cell pseudotime from the nearest reference neighbors when the query cells are mapped to the reference in reduced dimensional space. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Signac)
+library(tidyverse)
+library(SeuratObject)
+```
+
+```{r}
+# read in data
+query_object <- readRDS("C:/Users/chris/Downloads/cord-cmml-granja-mapped.rds")
+ref_object <- readRDS("C:/Users/chris/Downloads/hematopoiesis-monocle3.rds")
+query_neighbors <- read.csv("C:/Users/chris/Downloads/query_neighbors.csv")
+```
+
+
+Plot query cells and their nearest neighbors 
+
+
+```{r}
+query_cells <- data.frame(umap1=query_neighbors$qUMAP_1, umap2=query_neighbors$qUMAP_2)
+query_cells_neighbors <- data.frame(umap1=query_neighbors$rUMAP_1, umap2=query_neighbors$rUMAP_2)
+
+
+ggplot() + geom_point(data=query_cells_neighbors, aes(x=umap1, y=umap2), color='grey', alpha=0.5) + geom_point(data=query_cells, aes(x=umap1, y=umap2), color='blue', alpha=0.1) + 
+  labs(title = "20 Nearest Neighbors (blue=query, grey=neighbors)") +
+  xlab("UMAP_1") + ylab("UMAP_2")
+
+qplot_df <- query_neighbors[,c("qUMAP_1", "qUMAP_2")] %>% mutate(data_type="query")
+rplot_df<- query_neighbors[,c("rUMAP_1", "rUMAP_2")] %>% mutate(data_type="reference neighbors")
+
+names(qplot_df) <- c("UMAP_1", "UMAP_2", "data_type")
+names(rplot_df) <- c("UMAP_1", "UMAP_2", "data_type")
+plot_df_combined  <- rbind(rplot_df, qplot_df) %>% group_by(data_type)
+
+
+ggplot(data=plot_df_combined, aes(x=UMAP_1, y=UMAP_2)) + 
+  geom_point(aes(color=data_type)) + 
+  scale_color_manual(values = c("query" = "blue", "reference neighbors" = "grey")) +
+  labs(title = "CMML and cord query cells with 20 nearest reference neighbors") + 
+  theme(plot.title = element_text(size=20), axis.text = element_text(size=15), 
+        axis.title = element_text(size=15))
+  
+```
+
+
+### Infs    
+Some of the reference cell pseudotimes which matched as one of the 20 nearest neighbors to the query cells were 'Inf'. These are plotted below. There are 5,218 of them (of 29,500 total reference neighbors. )
+```{r}
+wo_infs <- query_neighbors %>% filter(!grepl("Inf", ref_pseudotime))
+infs <- query_neighbors %>% filter(grepl("Inf", ref_pseudotime))
+
+ggplot() + geom_point(data=wo_infs, aes(x=rUMAP_1, y=rUMAP_2), color="grey") + 
+  geom_point(data=infs, aes(x=rUMAP_1, y=rUMAP_2), color="red") +
+  labs(title = "Reference neighbors with Inf pseudotime (red)")
+
+```
+
+
+Filtered reference cells with 'Inf' pseudotime out of ref_object. Rerun with KNN script. 
+```{r}
+ref_object_without_infs <- ref_object[,ref_object@meta.data$pseudotime!="Inf"]
+saveRDS(ref_object_without_infs, file="C:/Users/chris/Downloads/hematopoiesis-monocle3-no-inf.rds")
+
+```
+```{r}
+before <- ncol(ref_object)
+after <- ncol(ref_object_without_infs)
+```
+
+Filtered out `r before - after` cells which contained 'Inf' of `r before` total reference cells. `r after` cells remain in reference object.     
+
+Removing reference cells that have 'Inf' pseudotime results in the plot below.     
+
+```{r}
+ref_df_wo_infs <- data.frame(ref_object_without_infs@reductions$umap@cell.embeddings)
+query_umaps <- data.frame(query_object@reductions$ref.umap@cell.embeddings)
+
+ggplot() + geom_point(data=ref_df_wo_infs, aes(x=UMAP_1, y=UMAP_2), color='grey') + 
+  labs(title="Reference data with Inf removed.")
+
+ggplot() + geom_point(data=ref_df_wo_infs, aes(x=UMAP_1, y=UMAP_2), color='grey') + 
+  geom_point(data=query_umaps, aes(x=refUMAP_1, y=refUMAP_2), color='blue') +
+  labs(title="Reference data with Inf removed, including query cells (blue).")
+
+```
+
+Reran KNN script with these filtered reference cells.
+The matrix searching was running out of bounds of the matrix for several cells. These were cells which no longer had any reference cells near them (the reference cells that were removed because they had Inf pseudotimes).
+
+This run of the script was much slower (about 7.5 hours, using 11GB).    
+13 cells had < 20 nearest neighbors and their neighbors ended up being very distant, and 241 cells had no nearest neighbors. 
+
+```{r}
+query_neighbors_no_infs <- read.csv("C:/Users/chris/Downloads/query_neighbors_no_infs.csv")
+ref_cells_neighbors_no_infs <- data.frame(umap1=query_neighbors_no_infs$rUMAP_1, umap2=query_neighbors_no_infs$rUMAP_2)
+all_query_cells <- data.frame(query_object@reductions$ref.umap@cell.embeddings)
+
+ggplot() + geom_point(data=ref_cells_neighbors_no_infs, aes(x=umap1, y=umap2), color='grey') + 
+  geom_point(data=all_query_cells, aes(x=refUMAP_1, y=refUMAP_2), color='blue') + 
+  labs(title="All query cells (blue) and only non-Inf nearest reference neighbors (grey)")
+
+```
+
+
+``` {r}
+query_cells_no_infs_matched <- data.frame(umap1=query_neighbors_no_infs$qUMAP_1, umap2=query_neighbors_no_infs$qUMAP_2)
+
+ggplot() + geom_point(data=ref_cells_neighbors_no_infs, aes(x=umap1, y=umap2), color='grey') + 
+  geom_point(data=query_cells_no_infs_matched, aes(x=umap1, y=umap2), color='blue') + 
+  labs(title="Matched query cells (blue) and non-Inf nearest reference neighbors (grey)")
+
+```
+
+
+Add median pseudotime as metadata to Seurat object   
+```{r, echo=FALSE}
+query_neighbors_no_infs_median_PT <- query_neighbors_no_infs %>% group_by(query_cell) %>% arrange(euclidean_dist, .by_group=TRUE) %>% summarise(median_pseudotime = median(ref_pseudotime))
+
+query_neighbors_no_infs_median_PT <- column_to_rownames(query_neighbors_no_infs_median_PT, var='query_cell')
+
+query_object <- AddMetaData(query_object, query_neighbors_no_infs_median_PT)
+
+# saveRDS(query_object_with_PT, file="C:/Users/chris/Downloads/cord-cmml-granja-mapped-with-median-PT.rds")
+
+```
+
+``` {r}
+# densities and predicted clusters.
+
+query_umaps.tbl <- query_object_with_PT@reductions$ref.umap@cell.embeddings
+query_umaps.df <- data.frame(query_umaps.tbl)
+# query_umaps.df["predicted_cluster"] <- query_object@meta.data$predicted.cluster
+# 
+# ggplot(query_umaps.df, aes(x=refUMAP_1, y=refUMAP_2, col=predicted_cluster)) + geom_point() +
+#   labs(title="Mapped query cells grouped by predicted.cluster")
+
+ggplot(query_umaps.df, aes(x=refUMAP_1, y=refUMAP_2)) + 
+  geom_bin2d(bins = 100) +
+  scale_fill_continuous(type = "viridis") +
+  theme_bw() +
+  labs(title="Density of mapped query cells (bin size = 100 cells)")
+
+
+```
+
+
+Investigate euclidean distance. In general the euclidean distance looks promising, and the KNN script appears to function as intended. 
+
+```{r}
+query_neighbors_edist.tbl <- query_neighbors_no_infs %>% group_by(query_cell) %>% arrange(euclidean_dist, .by_group=TRUE) %>% summarise(median_edist = median(euclidean_dist))
+
+query_neighbors_edist.tbl <- column_to_rownames(query_neighbors_edist.tbl, var='query_cell')
+
+query_object_with_PT <- AddMetaData(query_object_with_PT, query_neighbors_edist.tbl)
+
+ggplot(query_neighbors_no_infs, aes(x=qUMAP_1, y=qUMAP_2, col=euclidean_dist)) +
+  geom_point() + 
+  scale_color_viridis_c() +
+  labs(title="Mapped query cells and euclidean distance to nearest reference neighbors")
+
+
+edist_cluster.df <- data.frame(euclidean_dist=query_object_with_PT@meta.data$median_edist, predicted_cluster=query_object_with_PT@meta.data$predicted.cluster)
+
+ggplot(edist_cluster.df, aes(x=predicted_cluster, y=euclidean_dist)) + geom_boxplot() +
+  labs(title="Median euclidean distance to reference neighbors by predicted cluster") +
+  ylab("Median euclidean distance (of 20 neighbors)") + 
+  xlab("Predicted cluster") + 
+  theme(plot.title = element_text(size=20), axis.text = element_text(size=15), 
+        axis.title = element_text(size=15))
+
+```
+
+
+
+Reference cells in clusters 0 and 13 also had INF values, so rerun the KNN script without these values. 
+
+```{r}
+# rerun KNN without clusters 0 or 13. This only leaves 123 cells. 
+query_object_without_clusters_0_13 <- subset(query_object, subset = (predicted.cluster != 0 & predicted.cluster != 13))
+
+saveRDS(query_object_without_clusters_0_13, file="C:/Users/chris/Downloads/cord-cmml-granja-mapped-without-clusters-0-13.rds")
+```
+
+
+Add metadata to seurat object
+```{r}
+query_neighbors_without_clusters_0_13.tbl <- read_csv("C:/Users/chris/Downloads/query_neighbors_without_clusters_0_13.csv")
+
+query_neighbors_without_clusters_0_13_median_PT <- query_neighbors_without_clusters_0_13.tbl %>% group_by(query_cell) %>% arrange(euclidean_dist, .by_group=TRUE) %>% summarise(median_pseudotime = median(ref_pseudotime))
+
+query_neighbors_without_clusters_0_13.tbl <- column_to_rownames(query_neighbors_without_clusters_0_13_median_PT, var='query_cell')
+
+query_object <- AddMetaData(query_object, query_neighbors_without_clusters_0_13.tbl)
+
+query_object_without_clusters_0_13 <- subset(query_object, subset = (predicted.cluster != 0 & predicted.cluster != 13))
+
+saveRDS(query_object_without_clusters_0_13, file="C:/Users/chris/Downloads/cord-cmml-granja-mapped-with-median-PT_no_clusters_0_13.rds")
+
+
+```
+
+
+Check euclidean distance of object without clusters 0 and 13
+```{r}
+query_neighbors_no_0_13_edist.tbl <- query_neighbors_without_clusters_0_13.tbl %>% group_by(query_cell) %>% arrange(euclidean_dist, .by_group=TRUE) %>% summarise(median_edist = median(euclidean_dist))
+
+query_neighbors_no_0_13_edist.tbl <- column_to_rownames(query_neighbors_no_0_13_edist.tbl, var='query_cell')
+
+query_object <- AddMetaData(query_object, query_neighbors_no_0_13_edist.tbl)
+
+ggplot(query_neighbors_without_clusters_0_13.tbl, aes(x=qUMAP_1, y=qUMAP_2, col=euclidean_dist)) +
+  geom_point() + 
+  scale_color_viridis_c() +
+  theme_bw() +
+  labs(title="Mapped query cells and euclidean distance to nearest reference neighbors")
+
+
+edist_cluster.df <- data.frame(euclidean_dist=query_object@meta.data$median_edist, predicted_cluster=query_object@meta.data$predicted.cluster)
+
+ggplot(edist_cluster.df, aes(x=predicted_cluster, y=euclidean_dist)) + geom_boxplot() +
+  labs(title="Median euclidean distance to reference neighbors by predicted cluster (KNN run without clusters 0 and 13)")
+```
+
+
+Plot median pseudotime
+```{r}
+
+qn_no_0_13.df <- FetchData(query_object, c("refUMAP_1", "refUMAP_2", "median_pseudotime"))
+
+ggplot(qn_no_0_13.df, aes(x=refUMAP_1, y=refUMAP_2, col=median_pseudotime)) + geom_point() +
+  scale_color_viridis_c() +
+  labs(title="Mapped CMML and cord query cells and median pseudotime from KNN")
+
+
+ref_df <- data.frame(ref_object@reductions$umap@cell.embeddings)
+ref_df <- ref_df %>% mutate(pseudotime=ref_object@meta.data$pseudotime)
+
+ggplot(ref_df, aes(x=UMAP_1, y=UMAP_2, col=pseudotime)) + geom_point() +
+  scale_color_viridis_c() +
+  labs(title="Reference hematopoiesis UMAP with pseudotime")
+
+
+```
+
+
