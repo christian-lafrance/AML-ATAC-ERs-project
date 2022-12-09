@@ -9,6 +9,12 @@ generate.map()
 find.neighbors()
 
 
+# KNN_search_qc     
+
+This R markdown file summarizes the results of the KNN_search.R script and checks that the output is as expected. 
+
+
+
 ## cmml_cord_bio_reps.Rmd      
 
 This is a markdown file summarizing the simulation of biological replicates from normal and poisson distributions based on the CMML and cord pseudotime values estimated from the KNN_search.R script. It also includes simulated biological replicates from the pseudotime values themselves. 
