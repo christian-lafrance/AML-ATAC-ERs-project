@@ -9,7 +9,7 @@ generate.map()
 find.neighbors()
 
 
-# KNN_search_qc     
+## KNN_search_qc     
 
 This R markdown file summarizes the results of the KNN_search.R script and checks that the output is as expected. 
 
